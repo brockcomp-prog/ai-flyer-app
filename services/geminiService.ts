@@ -1,20 +1,28 @@
 
-import { GoogleGenAI, Modality, Type } from "@google/genai";
+import { Modality, Type, GenerateContentParameters } from "@google/genai";
 import type { FlyerInputs, CleanFlyerOutput, LogoInput, SubjectTransform, ImageInput, AnalyzedImageData, AnalyzedLogoElement } from '../types';
 
-let ai: GoogleGenAI | null = null;
-
 /**
- * Lazily initializes and returns the GoogleGenAI client instance.
- * This prevents the app from crashing on load if the API key is not yet available.
+ * A helper function to securely call our backend proxy for Gemini API requests.
+ * @param body The request body to send to the Gemini API.
+ * @returns The JSON response from the proxy.
  */
-const getAi = (): GoogleGenAI => {
-    if (!ai) {
-        // The API key is assumed to be available in process.env.API_KEY.
-        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+async function callProxy(body: GenerateContentParameters): Promise<any> {
+    const response = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Error from AI proxy:", errorData);
+        throw new Error(errorData.error || 'The AI proxy server returned an error.');
     }
-    return ai;
-};
+    return await response.json();
+}
 
 const compositeImages = (
     subjectBase64: string,
@@ -36,7 +44,6 @@ const compositeImages = (
         const subjectPromise = new Promise<void>((res, rej) => {
             const subjectImg = new Image();
             subjectImg.onload = () => {
-                // FIX: Corrected typo from `subject.height` to `subjectImg.height`.
                 const imgAspectRatio = subjectImg.width / subjectImg.height;
                 const canvasAspectRatio = targetWidth / targetHeight;
 
@@ -101,7 +108,7 @@ export const removeImageBackground = async (
     subjectImageMimeType: string
 ): Promise<{ base64: string; mimeType: string }> => {
     try {
-        const response = await getAi().models.generateContent({
+        const response = await callProxy({
             model: 'gemini-2.5-flash-image-preview',
             contents: {
                 parts: [
@@ -237,7 +244,7 @@ export const analyzeInspirationImage = async (
             },
         };
 
-        const response = await getAi().models.generateContent({
+        const response = await callProxy({
             model: 'gemini-2.5-flash',
             contents: {
                 parts: [
@@ -455,7 +462,7 @@ ${commonInstructions}
 };
 
 const callImageModel = async (prompt: string, imageParts: any[]): Promise<string> => {
-    const response = await getAi().models.generateContent({
+    const response = await callProxy({
         model: 'gemini-2.5-flash-image-preview',
         contents: {
             parts: [
