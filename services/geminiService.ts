@@ -2,9 +2,19 @@
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import type { FlyerInputs, CleanFlyerOutput, LogoInput, SubjectTransform, ImageInput, AnalyzedImageData, AnalyzedLogoElement } from '../types';
 
-// FIX: Update GoogleGenAI initialization to follow API guidelines.
-// The API key is assumed to be available in process.env.API_KEY.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let ai: GoogleGenAI | null = null;
+
+/**
+ * Lazily initializes and returns the GoogleGenAI client instance.
+ * This prevents the app from crashing on load if the API key is not yet available.
+ */
+const getAi = (): GoogleGenAI => {
+    if (!ai) {
+        // The API key is assumed to be available in process.env.API_KEY.
+        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    }
+    return ai;
+};
 
 const compositeImages = (
     subjectBase64: string,
@@ -91,7 +101,7 @@ export const removeImageBackground = async (
     subjectImageMimeType: string
 ): Promise<{ base64: string; mimeType: string }> => {
     try {
-        const response = await ai.models.generateContent({
+        const response = await getAi().models.generateContent({
             model: 'gemini-2.5-flash-image-preview',
             contents: {
                 parts: [
@@ -227,7 +237,7 @@ export const analyzeInspirationImage = async (
             },
         };
 
-        const response = await ai.models.generateContent({
+        const response = await getAi().models.generateContent({
             model: 'gemini-2.5-flash',
             contents: {
                 parts: [
@@ -445,7 +455,7 @@ ${commonInstructions}
 };
 
 const callImageModel = async (prompt: string, imageParts: any[]): Promise<string> => {
-    const response = await ai.models.generateContent({
+    const response = await getAi().models.generateContent({
         model: 'gemini-2.5-flash-image-preview',
         contents: {
             parts: [
