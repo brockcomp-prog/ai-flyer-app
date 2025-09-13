@@ -8,20 +8,43 @@ import type { FlyerInputs, CleanFlyerOutput, LogoInput, SubjectTransform, ImageI
  * @returns The JSON response from the proxy.
  */
 async function callProxy(body: GenerateContentParameters): Promise<any> {
-    const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20-second timeout
 
-    if (!response.ok) {
-        const errorData = await response.json();
-        console.error("Error from AI proxy:", errorData);
-        throw new Error(errorData.error || 'The AI proxy server returned an error.');
+    try {
+        const response = await fetch('/api/gemini', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal, // Add the abort signal
+        });
+        
+        clearTimeout(timeoutId); // Clear the timeout if the request succeeds
+
+        if (!response.ok) {
+            let errorMsg = `The AI server failed with status: ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorMsg = errorData.error || errorData.details || errorMsg;
+            } catch (e) {
+                // Response was not JSON, likely a server timeout page from Vercel
+                console.error("Could not parse error response from proxy. The server may have timed out.");
+            }
+            throw new Error(errorMsg);
+        }
+        return await response.json();
+    } catch (error) {
+        clearTimeout(timeoutId);
+        if (error instanceof Error) {
+            if (error.name === 'AbortError') {
+                throw new Error('The request to the AI server timed out. It might be too busy. Please try again in a moment.');
+            }
+        }
+        // Re-throw other errors
+        throw error;
     }
-    return await response.json();
 }
 
 const compositeImages = (
