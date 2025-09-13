@@ -421,7 +421,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
         
         // --- Smart Resizing Logic ---
         setProcessingMessage('Optimizing image for AI...');
-        const MAX_DIMENSION = 1024;
+        const MAX_DIMENSION = 800;
         let finalCanvas = canvas;
 
         if (canvas.width > MAX_DIMENSION || canvas.height > MAX_DIMENSION) {

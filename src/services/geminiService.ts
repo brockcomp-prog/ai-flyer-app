@@ -142,15 +142,7 @@ export const removeImageBackground = async (
                         },
                     },
                     {
-                        text: `
-Your task is to act as a professional photo editor. You will be given an image and you must perform a perfect background removal.
-
-1.  **Identify the main subject(s)** of the image (e.g., person, product, animal).
-2.  **Precisely isolate the subject(s).** Create a clean, sharp, and accurate cutout. Pay meticulous attention to fine details like hair, fur, semi-transparent areas, and complex edges.
-3.  **Completely and cleanly delete the entire background.** Leave no artifacts, shadows, or remnants of the original background.
-4.  **The output must be a PNG image with a true, transparent alpha channel.** Do not fill the background with any color (not white, not black, not anything). It must be transparent.
-5.  **Do not alter the subject itself.** The subject's colors, lighting, and details must be preserved.
-                        `,
+                        text: `Your task is to precisely remove the background from this image. Isolate the main subject and return a PNG with a true transparent background. Do not alter the subject itself.`,
                     },
                 ],
             },
