@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import type { FlyerInputs, LayoutPositions, LayoutGuidePosition, ArtStyle, FontStyle, LogoInput, SubjectTransform, ImageInput, Venue, Event, Season, Style, AnalyzedLogoElement } from '../types';
 import { INITIAL_LAYOUT_POSITIONS, VENUES, EVENTS, SEASONS, STYLES, ART_STYLES, FONT_STYLES } from '../constants';
@@ -83,6 +84,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
   const [mimicLogoActions, setMimicLogoActions] = useState<MimicLogoAction[]>([]);
 
   const [isProcessingSubject, setIsProcessingSubject] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState('');
   const [isAnalyzingInspiration, setIsAnalyzingInspiration] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -389,6 +391,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
     if (!originalImageForCrop || !crop) return;
 
     setIsProcessingSubject(true);
+    setProcessingMessage('Cropping image...');
     setError(null);
 
     const canvas = document.createElement('canvas');
@@ -415,9 +418,39 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
         }
 
         ctx.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
-        const croppedBase64 = canvas.toDataURL(originalImageForCrop.fileType).split(',')[1];
+        
+        // --- Smart Resizing Logic ---
+        setProcessingMessage('Optimizing image for AI...');
+        const MAX_DIMENSION = 1536;
+        let finalCanvas = canvas;
+
+        if (canvas.width > MAX_DIMENSION || canvas.height > MAX_DIMENSION) {
+            const resizeCanvas = document.createElement('canvas');
+            const resizeCtx = resizeCanvas.getContext('2d');
+            if (!resizeCtx) {
+                setError("Could not create canvas context for resizing.");
+                setIsProcessingSubject(false);
+                return;
+            }
+
+            const aspectRatio = canvas.width / canvas.height;
+            if (aspectRatio > 1) { // landscape
+                resizeCanvas.width = MAX_DIMENSION;
+                resizeCanvas.height = MAX_DIMENSION / aspectRatio;
+            } else { // portrait or square
+                resizeCanvas.height = MAX_DIMENSION;
+                resizeCanvas.width = MAX_DIMENSION * aspectRatio;
+            }
+            
+            resizeCtx.drawImage(canvas, 0, 0, resizeCanvas.width, resizeCanvas.height);
+            finalCanvas = resizeCanvas;
+        }
+        
+        const imageToSendForProcessing = finalCanvas.toDataURL(originalImageForCrop.fileType);
+        const croppedBase64 = imageToSendForProcessing.split(',')[1];
         
         try {
+            setProcessingMessage('Removing background with AI...');
             const { base64: processedBase64, mimeType: processedMimeType } = await removeImageBackground(croppedBase64, originalImageForCrop.fileType);
             const dataUrl = `data:${processedMimeType};base64,${processedBase64}`;
 
@@ -434,11 +467,13 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
             setError(err instanceof Error ? err.message : 'Failed to process subject.');
         } finally {
             setIsProcessingSubject(false);
+            setProcessingMessage('');
         }
     };
     img.onerror = () => {
         setError("Failed to load image for cropping.");
         setIsProcessingSubject(false);
+        setProcessingMessage('');
     }
   };
 
@@ -618,6 +653,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                 onConfirm={handleCropConfirm}
                 onCancel={handleCropCancel}
                 isProcessing={isProcessingSubject}
+                processingMessage={processingMessage}
             />
         )}
 
@@ -650,7 +686,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                             {isProcessingSubject ? (
                                 <div className="space-y-1 text-center py-4">
                                     <Loader />
-                                    <p className="text-sm text-neutral-200 mt-2">Processing image...</p>
+                                    <p className="text-sm text-neutral-200 mt-2">{processingMessage || 'Processing image...'}</p>
                                     <p className="text-xs text-neutral-700">This may take a moment.</p>
                                 </div>
                             ) : processedSubject ? (
@@ -946,7 +982,8 @@ const ImageCropper: React.FC<{
     onConfirm: () => void;
     onCancel: () => void;
     isProcessing: boolean;
-}> = ({ imageSrc, crop, setCrop, onConfirm, onCancel, isProcessing }) => {
+    processingMessage: string;
+}> = ({ imageSrc, crop, setCrop, onConfirm, onCancel, isProcessing, processingMessage }) => {
     const imageRef = useRef<HTMLImageElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const dragActionRef = useRef<{ type: 'move' | 'resize'; handle: string; startX: number; startY: number; startCrop: CropRect } | null>(null);
@@ -1051,7 +1088,7 @@ const ImageCropper: React.FC<{
             </div>
             <div className="flex gap-2 mt-4">
                 <button type="button" onClick={onConfirm} disabled={isProcessing} className="flex-1 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-neutral-950 bg-brand-primary hover:bg-brand-secondary disabled:bg-neutral-700">
-                    {isProcessing ? <div className="flex items-center justify-center gap-2"><Loader className="w-4 h-4 text-neutral-950" /> Cropping...</div> : "Crop & Continue"}
+                    {isProcessing ? <div className="flex items-center justify-center gap-2"><Loader className="w-4 h-4 text-neutral-950" /> {processingMessage || "Processing..."}</div> : "Crop & Continue"}
                 </button>
                 <button type="button" onClick={onCancel} disabled={isProcessing} className="px-4 py-2 border border-neutral-700 text-sm font-medium rounded-md text-white bg-neutral-800 hover:bg-neutral-700">
                     Cancel

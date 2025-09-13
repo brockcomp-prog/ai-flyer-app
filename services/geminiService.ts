@@ -9,7 +9,7 @@ import type { FlyerInputs, CleanFlyerOutput, LogoInput, SubjectTransform, ImageI
  */
 async function callProxy(body: GenerateContentParameters): Promise<any> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20-second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 35000); // 35-second timeout
 
     try {
         const response = await fetch('/api/gemini', {
