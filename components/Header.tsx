@@ -1,13 +1,9 @@
 
 
 import React from 'react';
-import { StarIcon, BookOpenIcon } from './Icon';
+import { StarIcon } from './Icon';
 
-interface HeaderProps {
-  onOpenLibrary: () => void;
-}
-
-const Header: React.FC<HeaderProps> = ({ onOpenLibrary }) => {
+const Header: React.FC = () => {
   return (
     <header className="bg-neutral-900 border-b border-neutral-800 p-4">
       <div className="container mx-auto flex items-center justify-between">
@@ -20,13 +16,6 @@ const Header: React.FC<HeaderProps> = ({ onOpenLibrary }) => {
             <p className="text-sm text-neutral-200">Flyers for any occasion</p>
           </div>
         </div>
-        <button
-          onClick={onOpenLibrary}
-          className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md text-neutral-200 bg-neutral-800 hover:bg-neutral-700 transition-colors"
-        >
-          <BookOpenIcon className="w-5 h-5" />
-          My Library
-        </button>
       </div>
     </header>
   );

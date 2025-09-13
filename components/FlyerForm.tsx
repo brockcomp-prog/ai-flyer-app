@@ -1,7 +1,6 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import type { FlyerInputs, LayoutPositions, LayoutGuidePosition, ArtStyle, FontStyle, LogoInput, SubjectTransform, ImageInput, Venue, Event, Season, Style, AnalyzedLogoElement } from '../types';
-import { INITIAL_LAYOUT_POSITIONS, VENUES, EVENTS, SEASONS, STYLES, ART_STYLES, FONT_STYLES } from '../constants';
+import type { FlyerInputs, LayoutPositions, LayoutGuidePosition, ArtStyle, FontStyle, LogoInput, SubjectTransform, ImageInput, Venue, Occasion, Club, Season, Style, AnalyzedLogoElement, FlyerSize } from '../types';
+import { INITIAL_LAYOUT_POSITIONS, VENUES, OCCASIONS, CLUBS, SEASONS, STYLES, ART_STYLES, FONT_STYLES, FLYER_SIZES } from '../constants';
 import { DEFAULT_SUGGESTION, findBestSuggestion, type TextSuggestion } from '../constants/suggestions';
 import { UploadIcon, GenerateIcon, MoveIcon, PlusIcon, TrashIcon, StarIcon, SparklesIcon, AdjustmentsIcon, ReplaceIcon } from './Icon';
 import { removeImageBackground, analyzeInspirationImage } from '../services/geminiService';
@@ -55,7 +54,63 @@ interface FlyerFormProps {
   isLoading: boolean;
 }
 
+const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<{ base64: string, mimeType: string, dataUrl: string }> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            if (!event.target?.result) {
+                return reject(new Error("Failed to read file."));
+            }
+            const img = new Image();
+            img.src = event.target.result as string;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let { width, height } = img;
+
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height *= maxWidth / width;
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width *= maxHeight / height;
+                        height = maxHeight;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    return reject(new Error('Could not get canvas context.'));
+                }
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // Preserve PNG for transparency, otherwise use JPEG for better compression.
+                const outputMimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+                const quality = outputMimeType === 'image/jpeg' ? 0.9 : undefined;
+
+                const dataUrl = canvas.toDataURL(outputMimeType, quality);
+                
+                resolve({
+                    base64: dataUrl.split(',')[1],
+                    mimeType: outputMimeType,
+                    dataUrl: dataUrl
+                });
+            };
+            img.onerror = (err) => reject(new Error(`Image could not be loaded.`));
+        };
+        reader.onerror = (err) => reject(new Error(`File could not be read.`));
+    });
+};
+
+
 const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
+  // Size State
+  const [flyerSize, setFlyerSize] = useState<FlyerSize>('square');
+
   // Text content states, initialized with defaults for a good first impression
   const [headline, setHeadline] = useState(DEFAULT_SUGGESTION.headline);
   const [subheading, setSubheading] = useState(DEFAULT_SUGGESTION.subheading);
@@ -67,7 +122,8 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
 
   // New style states
   const [venue, setVenue] = useState<Venue>('None');
-  const [event, setEvent] = useState<Event>('None');
+  const [occasion, setOccasion] = useState<Occasion>('None');
+  const [club, setClub] = useState<Club>('None');
   const [season, setSeason] = useState<Season>('None');
   const [style, setStyle] = useState<Style>('Auto');
   const [artStyle, setArtStyle] = useState<ArtStyle>('Auto');
@@ -84,7 +140,6 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
   const [mimicLogoActions, setMimicLogoActions] = useState<MimicLogoAction[]>([]);
 
   const [isProcessingSubject, setIsProcessingSubject] = useState(false);
-  const [processingMessage, setProcessingMessage] = useState('');
   const [isAnalyzingInspiration, setIsAnalyzingInspiration] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -114,7 +169,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
 
   // Effect to intelligently update text fields when style selections change
   useEffect(() => {
-    const newSuggestion = findBestSuggestion(venue, event, season);
+    const newSuggestion = findBestSuggestion(venue, occasion, club, season);
 
     // Only update fields that haven't been manually edited by the user.
     // We check if the current value matches the *previous* suggestion's value.
@@ -125,7 +180,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
 
     // Update the active suggestion for the next render
     setActiveSuggestion(newSuggestion);
-  }, [venue, event, season]);
+  }, [venue, occasion, club, season]);
 
   // Effect to perform client-side compositing for replaced logos
   useEffect(() => {
@@ -186,37 +241,32 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
   const handleSubjectFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      if (file.size > 4 * 1024 * 1024) {
-        setError('File size cannot exceed 4MB.');
-        return;
-      }
-      if (!['image/jpeg', 'image/png'].includes(file.type)) {
-          setError('Invalid file type. Please upload a JPG or PNG.');
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+          setError('Invalid file type. Please upload a JPG, PNG, or WEBP.');
           return;
       }
       setError(null);
       setProcessedSubject(null);
       event.target.value = '';
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const imgSrc = e.target!.result as string;
+      try {
+        const resized = await resizeImage(file, 2048, 2048);
         const img = new Image();
         img.onload = () => {
             setOriginalImageForCrop({
-                src: imgSrc,
+                src: resized.dataUrl,
                 width: img.naturalWidth,
                 height: img.naturalHeight,
-                fileType: file.type
+                fileType: resized.mimeType
             });
             setCrop({ x: 0, y: 0, width: 100, height: 100 });
         };
-        img.src = imgSrc;
-      };
-      reader.onerror = () => {
-        setError('Failed to read the file.');
-      };
-      reader.readAsDataURL(file);
+        img.src = resized.dataUrl;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+        setError(`Failed to process image: ${message}`);
+        console.error(err);
+      }
     }
   };
 
@@ -224,12 +274,8 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 4 * 1024 * 1024) {
-      setError('Inspiration image size cannot exceed 4MB.');
-      return;
-    }
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      setError('Invalid file type. Please upload a JPG or PNG.');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Invalid file type. Please upload a JPG, PNG, or WEBP.');
       return;
     }
     
@@ -240,127 +286,105 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
     event.target.value = '';
 
     try {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = async (e) => {
-            try {
-                const dataUrl = e.target!.result as string;
-                const base64 = dataUrl.split(',')[1];
-                const imageData = {
-                    thumbnailSrc: dataUrl,
-                    base64,
-                    mimeType: file.type,
-                    name: file.name,
-                };
-                setInspirationImage(imageData);
-                setModifiedInspirationImage(imageData);
-
-
-                const analysisResult = await analyzeInspirationImage(base64, file.type);
-                
-                setHeadline(analysisResult.headline.text);
-                setSubheading(analysisResult.subheading.text);
-                setBody(analysisResult.body.text);
-                setContactInfo(analysisResult.contactInfo.text);
-                setLayoutPositions({
-                    headline: analysisResult.headline.position,
-                    subheading: analysisResult.subheading.position,
-                    body: analysisResult.body.position,
-                    contactInfo: analysisResult.contactInfo.position,
-                });
-                setMimicLogoActions(analysisResult.logos.map((logo, i) => ({
-                    id: `logo-${Date.now()}-${i}`,
-                    originalLogo: logo,
-                    action: 'keep',
-                })));
-
-            } catch (err) {
-                 setError(err instanceof Error ? err.message : 'Failed to analyze inspiration image.');
-                 setInspirationImage(null); // Clear image on failure
-                 setModifiedInspirationImage(null);
-            } finally {
-                setIsAnalyzingInspiration(false);
-            }
+        const resized = await resizeImage(file, 2048, 2048);
+        const imageData = {
+            thumbnailSrc: resized.dataUrl,
+            base64: resized.base64,
+            mimeType: resized.mimeType,
+            name: file.name,
         };
-        reader.onerror = () => {
-          throw new Error('Failed to read the file.');
-        };
+        setInspirationImage(imageData);
+        setModifiedInspirationImage(imageData);
+
+
+        const analysisResult = await analyzeInspirationImage(resized.base64, resized.mimeType);
+        
+        setHeadline(analysisResult.headline.text);
+        setSubheading(analysisResult.subheading.text);
+        setBody(analysisResult.body.text);
+        setContactInfo(analysisResult.contactInfo.text);
+        setLayoutPositions({
+            headline: analysisResult.headline.position,
+            subheading: analysisResult.subheading.position,
+            body: analysisResult.body.position,
+            contactInfo: analysisResult.contactInfo.position,
+        });
+        setMimicLogoActions(analysisResult.logos.map((logo, i) => ({
+            id: `logo-${Date.now()}-${i}`,
+            originalLogo: logo,
+            action: 'keep',
+        })));
+
     } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to process file.');
-        setInspirationImage(null); // Clear image on failure
-        setModifiedInspirationImage(null);
+         setError(err instanceof Error ? err.message : 'Failed to analyze inspiration image.');
+         setInspirationImage(null); // Clear image on failure
+         setModifiedInspirationImage(null);
+    } finally {
         setIsAnalyzingInspiration(false);
     }
 };
 
-  const handleLogoFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       if (logos.length >= 3) {
         setError('You can upload a maximum of 3 logos.');
         return;
       }
-      if (file.size > 2 * 1024 * 1024) {
-        setError('Logo file size cannot exceed 2MB.');
-        return;
-      }
-      if (!['image/jpeg', 'image/png'].includes(file.type)) {
-        setError('Invalid file type. Please upload a JPG or PNG for logos.');
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        setError('Invalid file type. Please upload a JPG, PNG, or WEBP for logos.');
         return;
       }
       setError(null);
       
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64 = (e.target!.result as string).split(',')[1];
+      try {
+        const resized = await resizeImage(file, 512, 512);
         const newLogo: LogoInput = {
           id: `${Date.now()}-${file.name}`,
-          base64,
-          mimeType: file.type,
+          base64: resized.base64,
+          mimeType: resized.mimeType,
           name: file.name,
           position: { top: 15 + logos.length * 10, left: 15 },
         };
         setLogos(prev => [...prev, newLogo]);
-      };
-      reader.readAsDataURL(file);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+        setError(`Failed to process logo: ${message}`);
+      }
       event.target.value = ''; // Reset file input
     }
   };
 
-  const handleLogoReplaceFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoReplaceFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     const logoId = logoToReplaceIdRef.current;
     if (!file || !logoId) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-        setError('Replacement logo file size cannot exceed 2MB.');
-        return;
-    }
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-        setError('Invalid file type. Please upload a JPG or PNG for logos.');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        setError('Invalid file type. Please upload a JPG, PNG, or WEBP for logos.');
         return;
     }
     setError(null);
 
-    const reader = new FileReader();
-    reader.onload = e => {
-        const dataUrl = e.target!.result as string;
-        const base64 = dataUrl.split(',')[1];
+    try {
+        const resized = await resizeImage(file, 512, 512);
         setMimicLogoActions(prev => prev.map(action => 
             action.id === logoId 
             ? { 
                 ...action, 
                 action: 'replace',
                 replacementLogo: {
-                    base64,
-                    mimeType: file.type,
-                    objectUrl: dataUrl,
+                    base64: resized.base64,
+                    mimeType: resized.mimeType,
+                    objectUrl: resized.dataUrl,
                 }
             }
             : action
         ));
-    };
-    reader.readAsDataURL(file);
+    } catch(err) {
+        const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+        setError(`Failed to process replacement logo: ${message}`);
+    }
     event.target.value = '';
     logoToReplaceIdRef.current = null;
   };
@@ -391,7 +415,6 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
     if (!originalImageForCrop || !crop) return;
 
     setIsProcessingSubject(true);
-    setProcessingMessage('Cropping image...');
     setError(null);
 
     const canvas = document.createElement('canvas');
@@ -418,39 +441,9 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
         }
 
         ctx.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
-        
-        // --- Smart Resizing Logic ---
-        setProcessingMessage('Optimizing image for AI...');
-        const MAX_DIMENSION = 1536;
-        let finalCanvas = canvas;
-
-        if (canvas.width > MAX_DIMENSION || canvas.height > MAX_DIMENSION) {
-            const resizeCanvas = document.createElement('canvas');
-            const resizeCtx = resizeCanvas.getContext('2d');
-            if (!resizeCtx) {
-                setError("Could not create canvas context for resizing.");
-                setIsProcessingSubject(false);
-                return;
-            }
-
-            const aspectRatio = canvas.width / canvas.height;
-            if (aspectRatio > 1) { // landscape
-                resizeCanvas.width = MAX_DIMENSION;
-                resizeCanvas.height = MAX_DIMENSION / aspectRatio;
-            } else { // portrait or square
-                resizeCanvas.height = MAX_DIMENSION;
-                resizeCanvas.width = MAX_DIMENSION * aspectRatio;
-            }
-            
-            resizeCtx.drawImage(canvas, 0, 0, resizeCanvas.width, resizeCanvas.height);
-            finalCanvas = resizeCanvas;
-        }
-        
-        const imageToSendForProcessing = finalCanvas.toDataURL(originalImageForCrop.fileType);
-        const croppedBase64 = imageToSendForProcessing.split(',')[1];
+        const croppedBase64 = canvas.toDataURL(originalImageForCrop.fileType).split(',')[1];
         
         try {
-            setProcessingMessage('Removing background with AI...');
             const { base64: processedBase64, mimeType: processedMimeType } = await removeImageBackground(croppedBase64, originalImageForCrop.fileType);
             const dataUrl = `data:${processedMimeType};base64,${processedBase64}`;
 
@@ -467,13 +460,11 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
             setError(err instanceof Error ? err.message : 'Failed to process subject.');
         } finally {
             setIsProcessingSubject(false);
-            setProcessingMessage('');
         }
     };
     img.onerror = () => {
         setError("Failed to load image for cropping.");
         setIsProcessingSubject(false);
-        setProcessingMessage('');
     }
   };
 
@@ -563,7 +554,8 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
   const handleResetToAuto = () => {
     setIsCustomizingStyle(false);
     setVenue('None');
-    setEvent('None');
+    setOccasion('None');
+    setClub('None');
     setSeason('None');
     setStyle('Auto');
     setArtStyle('Auto');
@@ -585,7 +577,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
       };
   }, [handleDragMove, handleDragEnd]);
 
-  // FIX: Rename `event` parameter to `formEvent` to avoid shadowing the `event` state variable.
+  // FIX: Rename `event` parameter to `formEvent` to avoid shadowing the `occasion` state variable.
   const handleSubmit = (formEvent: React.FormEvent<HTMLFormElement>) => {
     formEvent.preventDefault();
     if (!headline.trim()) {
@@ -615,13 +607,15 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
       .map(l => l.originalLogo);
 
     onSubmit({
+      flyerSize,
       imageInput,
       headline,
       subheading,
       body,
       contactInfo,
       venue,
-      event,
+      occasion,
+      club,
       season,
       style,
       artStyle,
@@ -639,12 +633,18 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
     { id: 'contactInfo' as const, text: 'Contact Info' },
   ];
   
+  const selectedSizeConfig = FLYER_SIZES.find(s => s.value === flyerSize) || FLYER_SIZES[0];
+  const previewAspectRatio = `${selectedSizeConfig.width} / ${selectedSizeConfig.height}`;
   const previewBgClass = (imageMode === 'inspiration' && modifiedInspirationImage) ? 'bg-transparent' : 'bg-neutral-800';
 
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-6 bg-neutral-900 p-6 rounded-lg border border-neutral-800">
         
+        <Select label="Flyer Size" value={flyerSize} onChange={e => setFlyerSize(e.target.value as FlyerSize)}>
+            {FLYER_SIZES.map(size => <option key={size.value} value={size.value}>{size.label}</option>)}
+        </Select>
+
         {originalImageForCrop && (
             <ImageCropper
                 imageSrc={originalImageForCrop.src}
@@ -653,7 +653,6 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                 onConfirm={handleCropConfirm}
                 onCancel={handleCropCancel}
                 isProcessing={isProcessingSubject}
-                processingMessage={processingMessage}
             />
         )}
 
@@ -686,7 +685,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                             {isProcessingSubject ? (
                                 <div className="space-y-1 text-center py-4">
                                     <Loader />
-                                    <p className="text-sm text-neutral-200 mt-2">{processingMessage || 'Processing image...'}</p>
+                                    <p className="text-sm text-neutral-200 mt-2">Processing image...</p>
                                     <p className="text-xs text-neutral-700">This may take a moment.</p>
                                 </div>
                             ) : processedSubject ? (
@@ -705,10 +704,10 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                                     <div className="flex text-sm text-neutral-200">
                                         <label htmlFor="subject-file-upload" className="relative cursor-pointer bg-neutral-900 rounded-md font-medium text-brand-primary hover:text-brand-secondary focus-within:outline-none">
                                             <span>Upload a subject</span>
-                                            <input id="subject-file-upload" name="file-upload" type="file" className="sr-only" onChange={handleSubjectFileChange} accept="image/png, image/jpeg" disabled={isProcessingSubject}/>
+                                            <input id="subject-file-upload" name="file-upload" type="file" className="sr-only" onChange={handleSubjectFileChange} accept="image/png, image/jpeg, image/webp" disabled={isProcessingSubject}/>
                                         </label>
                                     </div>
-                                    <p className="text-xs text-neutral-700">PNG, JPG up to 4MB</p>
+                                    <p className="text-xs text-neutral-700">PNG, JPG, WEBP</p>
                                 </div>
                             )}
                         </div>
@@ -740,10 +739,10 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                                     <div className="flex text-sm text-neutral-200">
                                         <label htmlFor="inspiration-file-upload" className="relative cursor-pointer bg-neutral-900 rounded-md font-medium text-brand-primary hover:text-brand-secondary focus-within:outline-none">
                                             <span>Upload to mimic style</span>
-                                            <input id="inspiration-file-upload" type="file" className="sr-only" onChange={handleInspirationFileChange} accept="image/png, image/jpeg" disabled={isAnalyzingInspiration} />
+                                            <input id="inspiration-file-upload" type="file" className="sr-only" onChange={handleInspirationFileChange} accept="image/png, image/jpeg, image/webp" disabled={isAnalyzingInspiration} />
                                         </label>
                                     </div>
-                                    <p className="text-xs text-neutral-700">PNG, JPG up to 4MB</p>
+                                    <p className="text-xs text-neutral-700">PNG, JPG, WEBP</p>
                                 </div>
                             )}
                         </div>
@@ -775,7 +774,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                   Add Logo ({logos.length}/3)
                 </button>
               )}
-              <input type="file" ref={logoFileInputRef} className="sr-only" onChange={handleLogoFileChange} accept="image/png, image/jpeg" />
+              <input type="file" ref={logoFileInputRef} className="sr-only" onChange={handleLogoFileChange} accept="image/png, image/jpeg, image/webp" />
             </div>
           </div>
         )}
@@ -787,7 +786,8 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                 <label className="block text-sm font-medium text-neutral-200 mb-2">Layout Preview</label>
                 <div
                     ref={previewContainerRef}
-                    className={`relative w-full aspect-[1080/1350] rounded-md overflow-hidden border border-neutral-700 ${previewBgClass}`}
+                    className={`relative w-full rounded-md overflow-hidden border border-neutral-700 ${previewBgClass}`}
+                    style={{ aspectRatio: previewAspectRatio }}
                 >
                     {imageMode === 'inspiration' && modifiedInspirationImage && (
                         <img
@@ -841,7 +841,7 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                           />
                       </React.Fragment>
                     ))}
-                    <input type="file" ref={logoReplaceFileInputRef} className="sr-only" onChange={handleLogoReplaceFileChange} accept="image/png, image/jpeg" />
+                    <input type="file" ref={logoReplaceFileInputRef} className="sr-only" onChange={handleLogoReplaceFileChange} accept="image/png, image/jpeg, image/webp" />
                      {imageMode === 'inspiration' && mimicLogoActions.map((logoAction, index) => (
                         <LogoOverlay
                             key={logoAction.id}
@@ -929,8 +929,11 @@ const FlyerForm: React.FC<FlyerFormProps> = ({ onSubmit, isLoading }) => {
                                 <Select label="Venue / Business" value={venue} onChange={e => setVenue(e.target.value as Venue)}>
                                     {VENUES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
                                 </Select>
-                                <Select label="Event / Occasion" value={event} onChange={e => setEvent(e.target.value as Event)}>
-                                    {EVENTS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+                                <Select label="Occasion" value={occasion} onChange={e => setOccasion(e.target.value as Occasion)}>
+                                    {OCCASIONS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+                                </Select>
+                                <Select label="Club / Nightlife" value={club} onChange={e => setClub(e.target.value as Club)}>
+                                    {CLUBS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
                                 </Select>
                                 <Select label="Season / Holiday" value={season} onChange={e => setSeason(e.target.value as Season)}>
                                     {SEASONS.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
@@ -982,8 +985,7 @@ const ImageCropper: React.FC<{
     onConfirm: () => void;
     onCancel: () => void;
     isProcessing: boolean;
-    processingMessage: string;
-}> = ({ imageSrc, crop, setCrop, onConfirm, onCancel, isProcessing, processingMessage }) => {
+}> = ({ imageSrc, crop, setCrop, onConfirm, onCancel, isProcessing }) => {
     const imageRef = useRef<HTMLImageElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const dragActionRef = useRef<{ type: 'move' | 'resize'; handle: string; startX: number; startY: number; startCrop: CropRect } | null>(null);
@@ -1088,7 +1090,7 @@ const ImageCropper: React.FC<{
             </div>
             <div className="flex gap-2 mt-4">
                 <button type="button" onClick={onConfirm} disabled={isProcessing} className="flex-1 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-neutral-950 bg-brand-primary hover:bg-brand-secondary disabled:bg-neutral-700">
-                    {isProcessing ? <div className="flex items-center justify-center gap-2"><Loader className="w-4 h-4 text-neutral-950" /> {processingMessage || "Processing..."}</div> : "Crop & Continue"}
+                    {isProcessing ? <div className="flex items-center justify-center gap-2"><Loader className="w-4 h-4 text-neutral-950" /> Cropping...</div> : "Crop & Continue"}
                 </button>
                 <button type="button" onClick={onCancel} disabled={isProcessing} className="px-4 py-2 border border-neutral-700 text-sm font-medium rounded-md text-white bg-neutral-800 hover:bg-neutral-700">
                     Cancel

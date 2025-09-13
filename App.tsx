@@ -1,169 +1,92 @@
 
-
 import React, { useState, useEffect } from 'react';
-import type { StoredFlyer, CleanFlyerOutput } from './types';
+import type { FlyerInputs, MonetizedFlyerOutput } from './types';
 import { generateFlyer } from './services/geminiService';
 import Header from './components/Header';
 import FlyerForm from './components/FlyerForm';
 import FlyerPreview from './components/FlyerPreview';
 import Loader from './components/Loader';
-import LibraryModal from './components/LibraryModal';
-import { DownloadIcon } from './components/Icon';
+import { CheckIcon, DownloadIcon } from './components/Icon';
 
+const PENDING_PURCHASE_KEY = 'ai-flyer-pending-purchase';
 
-const LIBRARY_STORAGE_KEY = 'ai-flyer-library';
-const MAX_LIBRARY_ITEMS = 20;
+// IMPORTANT: Replace this with your actual Stripe Payment Link
+const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_7sI5m4eZI1a4gGQcMM';
 
-/**
- * Adds a watermark to an image from a data URL.
- * @param imageUrl The data URL of the image to watermark.
- * @param text The watermark text.
- * @returns A promise that resolves with the data URL of the watermarked image.
- */
-const addWatermark = (imageUrl: string, text: string = "Created with AI Flyer Generator"): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        return reject(new Error('Could not get canvas context.'));
-      }
-
-      // Draw original image
-      ctx.drawImage(img, 0, 0);
-
-      // Watermark styles
-      const padding = Math.max(20, img.width * 0.015);
-      const fontSize = Math.max(18, Math.min(img.width / 40, 24));
-      ctx.font = `bold ${fontSize}px Inter, sans-serif`;
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'bottom';
-      
-      // Draw watermark text
-      ctx.fillText(text, canvas.width - padding, canvas.height - padding);
-
-      resolve(canvas.toDataURL('image/png'));
-    };
-    img.onerror = (err) => {
-      console.error("Failed to load image for watermarking.", err);
-      reject(new Error('Failed to load image for watermarking.'));
-    };
-    img.src = imageUrl;
-  });
+// Client-side watermarking function
+const addWatermark = (imageUrl: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject('Could not get canvas context');
+        
+        ctx.drawImage(img, 0, 0);
+        
+        // Watermark style
+        const watermarkText = 'Created with AI Flyer Generator';
+        const padding = Math.max(20, canvas.width * 0.01);
+        ctx.font = `bold ${Math.max(16, canvas.width * 0.015)}px Inter, sans-serif`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        
+        ctx.fillText(watermarkText, canvas.width - padding, canvas.height - padding);
+        
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => reject('Failed to load image for watermarking');
+      img.src = imageUrl;
+    });
 };
-
 
 const App: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [flyerOutput, setFlyerOutput] = useState<StoredFlyer | null>(null);
-
-  // Library State
-  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
-  const [libraryItems, setLibraryItems] = useState<StoredFlyer[]>([]);
+  const [flyerOutput, setFlyerOutput] = useState<MonetizedFlyerOutput | null>(null);
+  const [lastFlyerInputs, setLastFlyerInputs] = useState<FlyerInputs | null>(null);
   
-  // Payment State
-  const [purchasedFlyer, setPurchasedFlyer] = useState<StoredFlyer | null>(null);
-  const [isPurchasing, setIsPurchasing] = useState(false);
+  // Purchase State
+  const [purchaseSuccessUrl, setPurchaseSuccessUrl] = useState<string | null>(null);
 
-  // Load library from localStorage on initial render
+  // Check for successful purchase on initial render
   useEffect(() => {
-    try {
-      const storedFlyers = localStorage.getItem(LIBRARY_STORAGE_KEY);
-      if (storedFlyers) {
-        const parsedFlyers: StoredFlyer[] = JSON.parse(storedFlyers);
-        if (Array.isArray(parsedFlyers)) {
-            setLibraryItems(parsedFlyers);
-            
-            // Check for successful payment redirect
-            const urlParams = new URLSearchParams(window.location.search);
-            const paymentSuccess = urlParams.get('payment_success');
-            const flyerId = urlParams.get('flyer_id');
-            
-            if (paymentSuccess === 'true' && flyerId) {
-                const foundFlyer = parsedFlyers.find(item => item.id === flyerId);
-                if (foundFlyer) {
-                    setPurchasedFlyer(foundFlyer);
-                    // Clean up URL
-                    window.history.replaceState(null, '', window.location.pathname);
-                }
-            }
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('payment_success')) {
+        const cleanUrl = localStorage.getItem(PENDING_PURCHASE_KEY);
+        if (cleanUrl) {
+            setPurchaseSuccessUrl(cleanUrl);
+            localStorage.removeItem(PENDING_PURCHASE_KEY);
+            // Clean up URL to prevent modal from showing on refresh
+            window.history.replaceState({}, document.title, window.location.pathname);
         }
-      }
-    } catch (e) {
-      console.error("Failed to load or parse library from localStorage", e);
-      localStorage.removeItem(LIBRARY_STORAGE_KEY);
     }
   }, []);
 
-  const handlePurchase = async (flyer: StoredFlyer) => {
-    setIsPurchasing(true);
-    setError(null);
-    try {
-        // This endpoint needs to be created as a serverless function.
-        const response = await fetch('/api/create-checkout-session', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ flyer }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to create payment session.');
-        }
-
-        const { url: checkoutUrl } = await response.json();
-        if (checkoutUrl) {
-            window.location.href = checkoutUrl;
-        } else {
-            throw new Error('Could not get payment URL.');
-        }
-    } catch (err) {
-        setError(err instanceof Error ? err.message : 'An unknown error occurred during purchase.');
-        setIsPurchasing(false);
-    }
-  };
-
-
-  const handleGenerateFlyer = async (inputs: any) => {
-    setLoadingMessage('Generating your flyer...');
+  const handleGenerateFlyer = async (inputs: FlyerInputs) => {
+    setLoadingMessage(inputs.redesignRequest ? 'Redesigning your flyer...' : 'Generating your flyer...');
     setError(null);
     setFlyerOutput(null);
-    try {
-      const result: CleanFlyerOutput = await generateFlyer(inputs, setLoadingMessage);
-      
-      setLoadingMessage('Adding final touches...');
-      const [watermarkedFlyerImageUrl, watermarkedThumbnailImageUrl] = await Promise.all([
-        addWatermark(result.flyerImageUrl),
-        addWatermark(result.thumbnailImageUrl)
-      ]);
-      
-      const newFlyer: StoredFlyer = {
-        ...result,
-        watermarkedFlyerImageUrl,
-        watermarkedThumbnailImageUrl,
-        id: `flyer-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-      };
-      
-      setFlyerOutput(newFlyer);
+    
+    const { redesignRequest, ...baseInputs } = inputs;
+    setLastFlyerInputs(baseInputs);
 
-      setLibraryItems(prevItems => {
-        const updatedItems = [newFlyer, ...prevItems].slice(0, MAX_LIBRARY_ITEMS);
-        try {
-          localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(updatedItems));
-        } catch (e) {
-          console.error("Failed to save to localStorage", e);
-        }
-        return updatedItems;
-      });
+    try {
+      const result = await generateFlyer(inputs, setLoadingMessage);
+      
+      onProgress('Adding watermark...');
+      const watermarkedImageUrl = await addWatermark(result.flyerImageUrl);
+
+      const output: MonetizedFlyerOutput = {
+        cleanFlyerImageUrl: result.flyerImageUrl,
+        watermarkedFlyerImageUrl: watermarkedImageUrl,
+      };
+
+      setFlyerOutput(output);
 
     } catch (err) {
       console.error(err);
@@ -173,27 +96,45 @@ const App: React.FC = () => {
     }
   };
   
-  const handleDeleteLibraryItem = (idToDelete: string) => {
-    setLibraryItems(prevItems => {
-      const updatedItems = prevItems.filter(item => item.id !== idToDelete);
-       try {
-          localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(updatedItems));
-        } catch (e) {
-          console.error("Failed to update localStorage after deletion", e);
-        }
-      return updatedItems;
-    });
+  const onProgress = (message: string) => {
+    setLoadingMessage(message);
   };
 
-  const isGenerating = !!loadingMessage;
+  const handleRedesignFlyer = (prompt: string) => {
+    if (!lastFlyerInputs) {
+      setError("Cannot redesign. Please generate a flyer first.");
+      return;
+    }
+    const redesignInputs: FlyerInputs = {
+      ...lastFlyerInputs,
+      redesignRequest: prompt,
+    };
+    handleGenerateFlyer(redesignInputs);
+  };
+  
+  const handlePurchase = (flyer: MonetizedFlyerOutput) => {
+    if (!STRIPE_PAYMENT_LINK || STRIPE_PAYMENT_LINK.includes('YOUR_LINK_HERE')) {
+        setError("The payment link is not configured. Please contact the site administrator.");
+        return;
+    }
+    try {
+        localStorage.setItem(PENDING_PURCHASE_KEY, flyer.cleanFlyerImageUrl);
+        window.location.href = STRIPE_PAYMENT_LINK;
+    } catch (e) {
+        setError("Could not initiate purchase. Your browser's storage might be full or blocked.");
+        console.error("Failed to save pending purchase to localStorage", e);
+    }
+  };
+
+  const isLoading = !!loadingMessage;
 
   return (
     <div className="min-h-screen bg-neutral-950 flex flex-col">
-      <Header onOpenLibrary={() => setIsLibraryOpen(true)} />
+      <Header />
       <main className="flex-grow container mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-        <FlyerForm onSubmit={handleGenerateFlyer} isLoading={isGenerating} />
+        <FlyerForm onSubmit={handleGenerateFlyer} isLoading={isLoading} />
         <div className="lg:sticky top-8">
-          {isGenerating && (
+          {isLoading && (
             <div className="w-full h-[600px] bg-neutral-900 rounded-lg flex flex-col items-center justify-center animated-background">
                <Loader />
                <p className="mt-4 text-neutral-200">{loadingMessage}</p>
@@ -202,82 +143,61 @@ const App: React.FC = () => {
           )}
           {error && (
              <div className="w-full h-[600px] bg-red-900/20 border border-red-700 rounded-lg flex flex-col items-center justify-center p-8">
-                <h3 className="text-lg font-bold text-red-400">An Error Occurred</h3>
+                <h3 className="text-lg font-bold text-red-400">Action Failed</h3>
                 <p className="mt-2 text-center text-red-300">{error}</p>
              </div>
           )}
-          {!isGenerating && !error && (
-             <FlyerPreview flyerOutput={flyerOutput} onPurchase={handlePurchase} isPurchasing={isPurchasing} />
+          {!isLoading && !error && (
+             <FlyerPreview 
+                flyerOutput={flyerOutput} 
+                onRedesign={handleRedesignFlyer}
+                onPurchase={handlePurchase}
+                isLoading={isLoading}
+             />
           )}
         </div>
       </main>
-      {isLibraryOpen && (
-        <LibraryModal 
-            items={libraryItems} 
-            onClose={() => setIsLibraryOpen(false)}
-            onDeleteItem={handleDeleteLibraryItem}
-            onPurchase={handlePurchase}
-            isPurchasing={isPurchasing}
-        />
-      )}
-      {purchasedFlyer && (
+      {purchaseSuccessUrl && (
         <PaymentSuccessModal
-            flyer={purchasedFlyer}
-            onClose={() => setPurchasedFlyer(null)}
+            imageUrl={purchaseSuccessUrl}
+            onClose={() => setPurchaseSuccessUrl(null)}
         />
       )}
     </div>
   );
 };
 
-
-// --- Payment Success Modal ---
-interface PaymentSuccessModalProps {
-    flyer: StoredFlyer;
-    onClose: () => void;
-}
-
-const PaymentSuccessModal: React.FC<PaymentSuccessModalProps> = ({ flyer, onClose }) => {
-    
-    const handleDownload = (imageUrl: string, filename: string) => {
-      const a = document.createElement('a');
-      a.href = imageUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+const PaymentSuccessModal: React.FC<{ imageUrl: string; onClose: () => void; }> = ({ imageUrl, onClose }) => {
+    const handleDownload = () => {
+        const a = document.createElement('a');
+        a.href = imageUrl;
+        a.download = 'flyer-no-watermark.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     };
 
     return (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
-            <div className="bg-neutral-900 w-full max-w-lg rounded-lg border border-neutral-800 flex flex-col overflow-hidden p-8 text-center items-center">
-                <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center border-2 border-green-500 mb-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-8 h-8 text-green-400">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+            <div className="bg-neutral-900 w-full max-w-md rounded-lg border border-neutral-800 flex flex-col overflow-hidden text-center p-8" onClick={e => e.stopPropagation()}>
+                <div className="mx-auto w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center border-2 border-green-500">
+                    <CheckIcon className="w-8 h-8 text-green-400" />
                 </div>
-                <h2 className="text-2xl font-bold text-white">Payment Successful!</h2>
-                <p className="text-neutral-200 mt-2 mb-6">Your watermark-free flyers are ready for download.</p>
-                
-                <div className="w-full max-w-sm mx-auto bg-neutral-800 p-4 rounded-lg mb-6">
-                    <img src={flyer.thumbnailImageUrl} alt="Purchased flyer thumbnail" className="w-full rounded" />
+                <h2 className="text-2xl font-bold text-white mt-6">Payment Successful!</h2>
+                <p className="text-neutral-200 mt-2">Your watermark-free flyer is ready to download.</p>
+                <div className="my-6 p-2 bg-neutral-800 rounded-md">
+                    <img src={imageUrl} alt="Purchased flyer" className="w-full h-auto rounded-sm" />
                 </div>
-                
-                <div className="w-full flex items-center gap-4">
-                  <button onClick={() => handleDownload(flyer.flyerImageUrl, `flyer-${flyer.id}-clean.png`)} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-brand-primary/50 text-sm font-medium rounded-md text-brand-primary bg-brand-primary/10 hover:bg-brand-primary/20 transition-colors">
-                    <DownloadIcon className="w-4 h-4" /> Download Flyer
-                  </button>
-                   <button onClick={() => handleDownload(flyer.thumbnailImageUrl, `thumbnail-${flyer.id}-clean.png`)} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-brand-primary/50 text-sm font-medium rounded-md text-brand-primary bg-brand-primary/10 hover:bg-brand-primary/20 transition-colors">
-                    <DownloadIcon className="w-4 h-4" /> Download Thumb
-                  </button>
-                </div>
-                
-                <button onClick={onClose} className="mt-6 w-full px-4 py-2 bg-neutral-700 text-white rounded-md hover:bg-neutral-600 transition-colors">
-                    Done
+                <button onClick={handleDownload} className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-transparent text-base font-medium rounded-md text-neutral-950 bg-brand-primary hover:bg-brand-secondary transition-colors">
+                    <DownloadIcon className="w-5 h-5" /> Download Flyer
+                </button>
+                 <button onClick={onClose} className="w-full mt-2 px-4 py-2 text-sm font-medium rounded-md text-neutral-200 hover:bg-neutral-800 transition-colors">
+                    Close
                 </button>
             </div>
         </div>
     );
 };
+
 
 export default App;

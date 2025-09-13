@@ -1,4 +1,4 @@
-import type { Venue, Event, Season } from '../types';
+import type { Venue, Occasion, Club, Season } from '../types';
 
 export interface TextSuggestion {
   headline: string;
@@ -9,14 +9,15 @@ export interface TextSuggestion {
 
 const SUGGESTIONS: {
   venue?: Venue;
-  event?: Event;
+  occasion?: Occasion;
+  club?: Club;
   season?: Season;
   suggestion: TextSuggestion;
 }[] = [
   // Specific Combos
   {
     venue: 'Restaurant',
-    event: 'Grand Opening',
+    occasion: 'Grand Opening',
     suggestion: {
       headline: 'Grand Opening Feast',
       subheading: 'Taste a New Tradition',
@@ -26,7 +27,7 @@ const SUGGESTIONS: {
   },
   {
     venue: 'Hair Salon',
-    event: 'Big Sale',
+    occasion: 'Big Sale',
     suggestion: {
       headline: 'Annual Style Sale',
       subheading: '50% Off All Color Services',
@@ -45,13 +46,40 @@ const SUGGESTIONS: {
     }
   },
   {
-    event: 'Live Music',
+    occasion: 'Live Music',
     season: 'Summer',
     suggestion: {
         headline: 'Summer Concert Series',
         subheading: 'Live Bands Under the Stars',
         body: 'Every Saturday in July • 8 PM Start\nFood trucks and local brews on site.',
         contactInfo: 'The Open Air Stage • 101 Parkside Dr.\n@OpenAirStage',
+    }
+  },
+   {
+    club: 'Nightclub',
+    suggestion: {
+        headline: 'Massive Saturdays',
+        subheading: 'Resident DJs All Night Long',
+        body: 'Doors open at 10 PM | 21+\nVIP Bottle Service Available',
+        contactInfo: 'Club ELEVATE • 101 Beats Ave\nFor tables text (555)-123-4567',
+    }
+  },
+  {
+    club: 'DJ Set',
+    suggestion: {
+        headline: 'Special Guest DJ',
+        subheading: 'An Exclusive Night of House Music',
+        body: 'One night only! This Friday, 11 PM\nLimited tickets available at the door',
+        contactInfo: 'The Underground • 456 Bass Dr.\n@TheUnderground',
+    }
+  },
+  {
+    club: 'Lounge',
+    suggestion: {
+        headline: 'Elevated Evenings',
+        subheading: 'Craft Cocktails & Good Vibes',
+        body: 'Live Lo-fi beats from 8 PM\nHappy Hour until 9 PM',
+        contactInfo: 'The Velvet Room • 789 Chill St.\n@VelvetRoomLounge',
     }
   },
 
@@ -84,9 +112,9 @@ const SUGGESTIONS: {
     }
   },
 
-  // General Event
+  // General Occasion
   {
-    event: 'Grand Opening',
+    occasion: 'Grand Opening',
     suggestion: {
       headline: 'You\'re Invited!',
       subheading: 'Celebrate Our Grand Opening',
@@ -95,7 +123,7 @@ const SUGGESTIONS: {
     },
   },
   {
-    event: 'Live Music',
+    occasion: 'Live Music',
     suggestion: {
       headline: 'Live Music Night',
       subheading: 'Featuring The Groovy Tones',
@@ -104,7 +132,7 @@ const SUGGESTIONS: {
     },
   },
   {
-    event: 'Big Sale',
+    occasion: 'Big Sale',
     suggestion: {
       headline: 'Massive Sale Event',
       subheading: 'Everything Must Go!',
@@ -151,20 +179,22 @@ export const DEFAULT_SUGGESTION: TextSuggestion = {
 };
 
 // Helper function to find the best suggestion based on selected styles
-export const findBestSuggestion = (venue: Venue, event: Event, season: Season): TextSuggestion => {
+export const findBestSuggestion = (venue: Venue, occasion: Occasion, club: Club, season: Season): TextSuggestion => {
     const v = venue === 'None' ? undefined : venue;
-    const e = event === 'None' ? undefined : event;
+    const o = occasion === 'None' ? undefined : occasion;
+    const c = club === 'None' ? undefined : club;
     const s = season === 'None' ? undefined : season;
     
-    // Prioritize more specific matches
+    // Prioritize more specific matches, with club being a strong signal
     const bestMatch = 
-        SUGGESTIONS.find(item => item.venue === v && item.event === e && item.season === s) ||
-        SUGGESTIONS.find(item => item.venue === v && item.event === e && !item.season) ||
-        SUGGESTIONS.find(item => item.venue === v && item.season === s && !item.event) ||
-        SUGGESTIONS.find(item => item.event === e && item.season === s && !item.venue) ||
-        SUGGESTIONS.find(item => item.venue === v && !item.event && !item.season) ||
-        SUGGESTIONS.find(item => item.event === e && !item.venue && !item.season) ||
-        SUGGESTIONS.find(item => item.season === s && !item.venue && !item.event);
+        SUGGESTIONS.find(item => item.club === c && c !== undefined) ||
+        SUGGESTIONS.find(item => item.venue === v && item.occasion === o && item.season === s) ||
+        SUGGESTIONS.find(item => item.venue === v && item.occasion === o && !item.season) ||
+        SUGGESTIONS.find(item => item.venue === v && item.season === s && !item.occasion) ||
+        SUGGESTIONS.find(item => item.occasion === o && item.season === s && !item.venue) ||
+        SUGGESTIONS.find(item => item.venue === v && !item.occasion && !item.season) ||
+        SUGGESTIONS.find(item => item.occasion === o && !item.venue && !item.season) ||
+        SUGGESTIONS.find(item => item.season === s && !item.venue && !item.occasion);
 
     return bestMatch?.suggestion || DEFAULT_SUGGESTION;
 }

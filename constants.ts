@@ -1,4 +1,10 @@
-import type { LayoutPositions, ArtStyle, FontStyle, Venue, Event, Season, Style } from './types';
+import type { LayoutPositions, ArtStyle, FontStyle, Venue, Occasion, Club, Season, Style, FlyerSize } from './types';
+
+export const FLYER_SIZES: { value: FlyerSize; label: string; width: number; height: number; }[] = [
+    { value: 'square', label: 'Social Post (Square 1080x1080)', width: 1080, height: 1080 },
+    { value: 'portrait', label: 'Social Story (Portrait 1080x1920)', width: 1080, height: 1920 },
+    { value: 'landscape', label: 'Facebook Post (Landscape 1200x630)', width: 1200, height: 630 },
+];
 
 export const VENUES: { value: Venue; label: string }[] = [
     { value: 'None', label: 'None / Not Applicable' },
@@ -11,7 +17,7 @@ export const VENUES: { value: Venue; label: string }[] = [
     { value: 'Fitness', label: 'Fitness' },
 ];
 
-export const EVENTS: { value: Event; label: string }[] = [
+export const OCCASIONS: { value: Occasion; label: string }[] = [
     { value: 'None', label: 'None / Not Applicable' },
     { value: 'Grand Opening', label: 'Grand Opening' },
     { value: 'Big Sale', label: 'Big Sale' },
@@ -21,6 +27,17 @@ export const EVENTS: { value: Event; label: string }[] = [
     { value: 'Game Day', label: 'Game Day' },
     { value: 'Live Music', label: 'Live Music' },
     { value: 'Pool Party', label: 'Pool Party' },
+];
+
+export const CLUBS: { value: Club; label: string }[] = [
+    { value: 'None', label: 'None / Not Applicable' },
+    { value: 'Nightclub', label: 'Nightclub' },
+    { value: 'DJ Set', label: 'DJ Set' },
+    { value: 'Live Band', label: 'Live Band' },
+    { value: 'Lounge', label: 'Lounge' },
+    { value: 'Concert', label: 'Concert' },
+    { value: 'Rave', label: 'Rave' },
+    { value: 'Afterparty', label: 'Afterparty' },
 ];
 
 export const SEASONS: { value: Season; label: string }[] = [

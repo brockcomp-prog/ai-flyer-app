@@ -1,18 +1,16 @@
-
-
 import React, { useState } from 'react';
-import type { StoredFlyer } from '../types';
-import { DownloadIcon, CreditCardIcon } from './Icon';
-import Loader from './Loader';
+import type { MonetizedFlyerOutput } from '../types';
+import { DownloadIcon, WandIcon, CreditCardIcon } from './Icon';
 
 interface FlyerPreviewProps {
-  flyerOutput: StoredFlyer | null;
-  onPurchase: (flyer: StoredFlyer) => void;
-  isPurchasing: boolean;
+  flyerOutput: MonetizedFlyerOutput | null;
+  onRedesign: (prompt: string) => void;
+  onPurchase: (flyer: MonetizedFlyerOutput) => void;
+  isLoading: boolean;
 }
 
-const FlyerPreview: React.FC<FlyerPreviewProps> = ({ flyerOutput, onPurchase, isPurchasing }) => {
-    const [activeTab, setActiveTab] = useState<'flyer' | 'thumbnail'>('flyer');
+const FlyerPreview: React.FC<FlyerPreviewProps> = ({ flyerOutput, onRedesign, onPurchase, isLoading }) => {
+    const [redesignPrompt, setRedesignPrompt] = useState('');
     
     if (!flyerOutput) {
     return (
@@ -32,59 +30,59 @@ const FlyerPreview: React.FC<FlyerPreviewProps> = ({ flyerOutput, onPurchase, is
       document.body.removeChild(a);
   }
 
+  const handleRedesignSubmit = () => {
+    if (!redesignPrompt.trim() || isLoading) return;
+    onRedesign(redesignPrompt);
+    setRedesignPrompt('');
+  };
+
   return (
     <div className="bg-neutral-900 rounded-lg border border-neutral-800 overflow-hidden">
-      <div className="p-4 border-b border-neutral-800">
-          <div className="flex space-x-2">
-            <button onClick={() => setActiveTab('flyer')} className={`px-4 py-2 text-sm font-medium rounded-md ${activeTab === 'flyer' ? 'bg-brand-primary text-neutral-950' : 'bg-neutral-800 text-neutral-200'}`}>Flyer (1080x1350)</button>
-            <button onClick={() => setActiveTab('thumbnail')} className={`px-4 py-2 text-sm font-medium rounded-md ${activeTab === 'thumbnail' ? 'bg-brand-primary text-neutral-950' : 'bg-neutral-800 text-neutral-200'}`}>Thumbnail (1080x1080)</button>
-          </div>
-      </div>
-      
       <div className="p-4 bg-neutral-950">
-        {activeTab === 'flyer' && (
-          <img
-            src={flyerOutput.watermarkedFlyerImageUrl}
-            alt="Generated flyer preview with watermark"
-            className="w-full h-auto rounded-md shadow-lg"
-          />
-        )}
-        {activeTab === 'thumbnail' && (
-          <img
-            src={flyerOutput.watermarkedThumbnailImageUrl}
-            alt="Generated thumbnail preview with watermark"
-            className="w-full h-auto rounded-md shadow-lg"
-          />
-        )}
+        <img
+          src={flyerOutput.watermarkedFlyerImageUrl}
+          alt="Generated flyer preview"
+          className="w-full h-auto rounded-md shadow-lg"
+        />
       </div>
       
-      <div className="p-4 border-t border-neutral-800 space-y-4">
+      <div className="p-4 border-t border-neutral-800 space-y-3">
         <button 
           onClick={() => onPurchase(flyerOutput)} 
-          disabled={isPurchasing}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-neutral-950 bg-brand-primary hover:bg-brand-secondary transition-colors disabled:bg-neutral-700 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-neutral-950 bg-brand-primary hover:bg-brand-secondary transition-colors"
         >
-          {isPurchasing ? (
-            <>
-              <Loader className="w-5 h-5" />
-              Processing...
-            </>
-          ) : (
-            <>
-              <CreditCardIcon className="w-5 h-5" />
-              Purchase & Download (No Watermark)
-            </>
-          )}
+          <CreditCardIcon className="w-5 h-5" /> Purchase & Download (No Watermark)
         </button>
-        <div className="flex items-center gap-4">
-          <button onClick={() => handleDownload(flyerOutput.watermarkedFlyerImageUrl, `flyer-watermarked.png`)} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-neutral-700 text-sm font-medium rounded-md text-white bg-neutral-800 hover:bg-neutral-700 transition-colors">
-            <DownloadIcon className="w-4 h-4" /> Download Free Flyer
-          </button>
-           <button onClick={() => handleDownload(flyerOutput.watermarkedThumbnailImageUrl, `thumbnail-watermarked.png`)} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-neutral-700 text-sm font-medium rounded-md text-white bg-neutral-800 hover:bg-neutral-700 transition-colors">
-            <DownloadIcon className="w-4 h-4" /> Download Free Thumb
-          </button>
-        </div>
+        <button 
+          onClick={() => handleDownload(flyerOutput.watermarkedFlyerImageUrl, `flyer-watermarked.png`)} 
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-neutral-700 text-sm font-medium rounded-md text-white bg-neutral-800 hover:bg-neutral-700 transition-colors"
+        >
+          <DownloadIcon className="w-4 h-4" /> Download Free (with watermark)
+        </button>
       </div>
+
+      <div className="p-4 border-t border-neutral-800 space-y-3 bg-neutral-900/50">
+        <h4 className="text-base font-medium text-white">Refine Your Design</h4>
+        <p className="text-sm text-neutral-200">
+            Not quite right? Tell the AI what you want to change.
+        </p>
+        <textarea 
+            value={redesignPrompt}
+            onChange={(e) => setRedesignPrompt(e.target.value)}
+            placeholder="e.g., Make the background darker, use a more elegant font, change the main color to blue..."
+            className="w-full bg-neutral-800 border border-neutral-700 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm"
+            rows={3}
+            disabled={isLoading}
+        />
+        <button 
+            onClick={handleRedesignSubmit} 
+            disabled={isLoading || !redesignPrompt.trim()}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-neutral-950 bg-brand-secondary hover:bg-brand-primary disabled:bg-neutral-700 disabled:cursor-not-allowed transition-colors"
+        >
+            <WandIcon className="w-5 h-5" />
+            {isLoading ? 'Redesigning...' : 'Redesign Flyer'}
+        </button>
+    </div>
     </div>
   );
 };

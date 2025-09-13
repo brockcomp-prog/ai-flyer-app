@@ -1,51 +1,10 @@
+import { GoogleGenAI, Modality, Type } from "@google/genai";
+import type { FlyerInputs, FlyerOutput, LogoInput, SubjectTransform, ImageInput, AnalyzedImageData, AnalyzedLogoElement, FlyerSize } from '../types';
+import { FLYER_SIZES } from "../constants";
 
-import { Modality, Type, GenerateContentParameters } from "@google/genai";
-import type { FlyerInputs, CleanFlyerOutput, LogoInput, SubjectTransform, ImageInput, AnalyzedImageData, AnalyzedLogoElement } from '../types';
-
-/**
- * A helper function to securely call our backend proxy for Gemini API requests.
- * @param body The request body to send to the Gemini API.
- * @returns The JSON response from the proxy.
- */
-async function callProxy(body: GenerateContentParameters): Promise<any> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 35000); // 35-second timeout
-
-    try {
-        const response = await fetch('/api/gemini', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal, // Add the abort signal
-        });
-        
-        clearTimeout(timeoutId); // Clear the timeout if the request succeeds
-
-        if (!response.ok) {
-            let errorMsg = `The AI server failed with status: ${response.status}`;
-            try {
-                const errorData = await response.json();
-                errorMsg = errorData.error || errorData.details || errorMsg;
-            } catch (e) {
-                // Response was not JSON, likely a server timeout page from Vercel
-                console.error("Could not parse error response from proxy. The server may have timed out.");
-            }
-            throw new Error(errorMsg);
-        }
-        return await response.json();
-    } catch (error) {
-        clearTimeout(timeoutId);
-        if (error instanceof Error) {
-            if (error.name === 'AbortError') {
-                throw new Error('The request to the AI server timed out. It might be too busy. Please try again in a moment.');
-            }
-        }
-        // Re-throw other errors
-        throw error;
-    }
-}
+// FIX: Update GoogleGenAI initialization to follow API guidelines.
+// The API key is assumed to be available in process.env.API_KEY.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const compositeImages = (
     subjectBase64: string,
@@ -67,6 +26,7 @@ const compositeImages = (
         const subjectPromise = new Promise<void>((res, rej) => {
             const subjectImg = new Image();
             subjectImg.onload = () => {
+                // FIX: Corrected typo from `subject.height` to `subjectImg.height`.
                 const imgAspectRatio = subjectImg.width / subjectImg.height;
                 const canvasAspectRatio = targetWidth / targetHeight;
 
@@ -131,7 +91,7 @@ export const removeImageBackground = async (
     subjectImageMimeType: string
 ): Promise<{ base64: string; mimeType: string }> => {
     try {
-        const response = await callProxy({
+        const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image-preview',
             contents: {
                 parts: [
@@ -267,7 +227,7 @@ export const analyzeInspirationImage = async (
             },
         };
 
-        const response = await callProxy({
+        const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: {
                 parts: [
@@ -315,7 +275,10 @@ Return the data in a JSON object that strictly adheres to the provided schema.
     }
 };
 
-const createGenerationPrompt = (inputs: FlyerInputs, aspectRatio: 'portrait' | 'square'): string => {
+const createGenerationPrompt = (inputs: FlyerInputs): string => {
+    const selectedSize = FLYER_SIZES.find(s => s.value === inputs.flyerSize) || FLYER_SIZES[0];
+    const dimensions = { w: selectedSize.width, h: selectedSize.height };
+
     const layoutInstructions = `
 *   Headline Block: Centered at Top ${inputs.layoutPositions.headline.top.toFixed(1)}%, Left ${inputs.layoutPositions.headline.left.toFixed(1)}%.
 *   Subheading Block: Centered at Top ${inputs.layoutPositions.subheading.top.toFixed(1)}%, Left ${inputs.layoutPositions.subheading.left.toFixed(1)}%.
@@ -325,7 +288,8 @@ const createGenerationPrompt = (inputs: FlyerInputs, aspectRatio: 'portrait' | '
     
     const styleDescriptionParts = [];
     if (inputs.venue && inputs.venue !== 'None') styleDescriptionParts.push(`The flyer is for a '${inputs.venue}'.`);
-    if (inputs.event && inputs.event !== 'None') styleDescriptionParts.push(`It's promoting a '${inputs.event}' event.`);
+    if (inputs.occasion && inputs.occasion !== 'None') styleDescriptionParts.push(`It's promoting a '${inputs.occasion}' occasion.`);
+    if (inputs.club && inputs.club !== 'None') styleDescriptionParts.push(`The specific event type is '${inputs.club}'. This is a high-priority theme descriptor.`);
     if (inputs.season && inputs.season !== 'None') styleDescriptionParts.push(`The seasonal theme is '${inputs.season}'.`);
     if (inputs.style && inputs.style !== 'Auto') styleDescriptionParts.push(`The core aesthetic is '${inputs.style}'.`);
 
@@ -333,8 +297,15 @@ const createGenerationPrompt = (inputs: FlyerInputs, aspectRatio: 'portrait' | '
         ? styleDescriptionParts.join(' ')
         : `The AI should auto-detect a fitting theme based on the headline: "${inputs.headline}".`;
 
+    const redesignRequestInstruction = (inputs.redesignRequest && inputs.redesignRequest.trim() !== '') ? `
+**PRIORITY DIRECTIVE: ITERATIVE REDESIGN**
+This is a redesign of a previous version. The original creative brief still applies, but you MUST incorporate the following user-requested change with the highest priority. The goal is refinement, not a complete overhaul.
+*   **User's Change Request:** "${inputs.redesignRequest}"
+*   **Your Task**: Intelligently integrate this change. For example, if asked for a color change, update the palette. If asked for a font change, update the typography while respecting layout. If asked for a background change, replace the background scene. The core composition and text content should remain unless explicitly told to change them.
+` : '';
 
     const commonInstructions = `
+${redesignRequestInstruction}
 **Mission: Create an Award-Winning, Production-Ready Social Media Flyer with a "Wow" Factor.**
 You are a world-class art director and master typographer at a premier design agency. Your work is known for its cinematic quality, emotional depth, and impeccable execution. Your task is to create a visually arresting, high-end flyer that stops people scrolling and demands attention. The final result must look expensive, polished, and be of magazine-cover quality.
 
@@ -353,7 +324,7 @@ You are a world-class art director and master typographer at a premier design ag
 *   **Font Style for Headline**: "${inputs.fontStyle === 'Auto' ? `Auto-detect based on the Core Theme.` : inputs.fontStyle}"
 
 **2. TECHNICAL SPECIFICATIONS**
-*   **Aspect Ratio**: The final image MUST be **${aspectRatio}** (${aspectRatio === 'portrait' ? '1080x1350' : '1080x1080'}).
+*   **CRITICAL TECHNICAL MANDATE**: The final output image MUST have the exact dimensions of **${dimensions.w} pixels wide by ${dimensions.h} pixels high**. This is not a suggestion; it is a requirement. Do not add any padding or margins. The image content must fill these exact dimensions.
 *   **Output Format**: Deliver only a single, finished PNG image. Nothing else.
 
 **3. TYPOGRAPHY HIERARCHY & INTEGRATION (CRITICAL)**
@@ -485,7 +456,7 @@ ${commonInstructions}
 };
 
 const callImageModel = async (prompt: string, imageParts: any[]): Promise<string> => {
-    const response = await callProxy({
+    const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image-preview',
         contents: {
             parts: [
@@ -511,43 +482,40 @@ const callImageModel = async (prompt: string, imageParts: any[]): Promise<string
     throw new Error('AI failed to return a generated image.');
 };
 
-export const generateFlyer = async (inputs: FlyerInputs, onProgress: (message: string) => void): Promise<CleanFlyerOutput> => {
+export const generateFlyer = async (inputs: FlyerInputs, onProgress: (message: string) => void): Promise<FlyerOutput> => {
     try {
-        let portraitImageParts: any[] = [];
-        let squareImageParts: any[] = [];
+        let imageParts: any[] = [];
         const imageInput = inputs.imageInput;
+        const selectedSize = FLYER_SIZES.find(s => s.value === inputs.flyerSize) || FLYER_SIZES[0];
 
         if (imageInput?.type === 'subject') {
             onProgress('Compositing subject and logos...');
-            const [portraitCompositedBase64, squareCompositedBase64] = await Promise.all([
-                compositeImages(imageInput.base64, imageInput.logos, imageInput.transform, 1080, 1350),
-                compositeImages(imageInput.base64, imageInput.logos, imageInput.transform, 1080, 1080),
-            ]);
-            portraitImageParts.push({ inlineData: { data: portraitCompositedBase64, mimeType: 'image/png' } });
-            squareImageParts.push({ inlineData: { data: squareCompositedBase64, mimeType: 'image/png' } });
+            const compositedBase64 = await compositeImages(
+                imageInput.base64,
+                imageInput.logos,
+                imageInput.transform,
+                selectedSize.width,
+                selectedSize.height
+            );
+            imageParts.push({ inlineData: { data: compositedBase64, mimeType: 'image/png' } });
 
         } else if (imageInput?.type === 'inspiration') {
             onProgress('Preparing template image...');
             const inspirationPart = { inlineData: { data: imageInput.base64, mimeType: imageInput.mimeType } };
-            portraitImageParts.push(inspirationPart);
-            squareImageParts.push(inspirationPart);
+            imageParts.push(inspirationPart);
         }
 
         onProgress('Generating flyer design...');
-        const flyerPrompt = createGenerationPrompt(inputs, 'portrait');
-        const flyerImageUrl = await callImageModel(flyerPrompt, portraitImageParts);
+        const flyerPrompt = createGenerationPrompt(inputs);
+        const flyerImageUrl = await callImageModel(flyerPrompt, imageParts);
 
-        onProgress('Adapting design for thumbnail...');
-        const thumbnailPrompt = createGenerationPrompt(inputs, 'square');
-        const thumbnailImageUrl = await callImageModel(thumbnailPrompt, squareImageParts);
 
-        if (!flyerImageUrl || !thumbnailImageUrl) {
+        if (!flyerImageUrl) {
             throw new Error("Image generation failed to produce valid outputs.");
         }
 
         return {
             flyerImageUrl,
-            thumbnailImageUrl,
         };
 
     } catch (error) {

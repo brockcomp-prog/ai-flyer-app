@@ -1,19 +1,15 @@
-
-
 import React, { useState, useEffect } from 'react';
 import type { StoredFlyer } from '../types';
 import { CloseIcon, DownloadIcon, TrashIcon, CreditCardIcon } from './Icon';
-import Loader from './Loader';
 
 interface LibraryModalProps {
   items: StoredFlyer[];
   onClose: () => void;
   onDeleteItem: (id: string) => void;
   onPurchase: (flyer: StoredFlyer) => void;
-  isPurchasing: boolean;
 }
 
-const LibraryModal: React.FC<LibraryModalProps> = ({ items, onClose, onDeleteItem, onPurchase, isPurchasing }) => {
+const LibraryModal: React.FC<LibraryModalProps> = ({ items, onClose, onDeleteItem, onPurchase }) => {
   const [selectedItem, setSelectedItem] = useState<StoredFlyer | null>(null);
 
   useEffect(() => {
@@ -73,7 +69,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ items, onClose, onDeleteIte
           {selectedItem ? (
             <div className="flex flex-col md:flex-row gap-6">
                 <div className="flex-grow">
-                    <img src={selectedItem.watermarkedFlyerImageUrl} alt="Selected flyer with watermark" className="w-full h-auto rounded-md shadow-lg" />
+                    <img src={selectedItem.watermarkedFlyerImageUrl} alt="Selected flyer" className="w-full h-auto rounded-md shadow-lg" />
                 </div>
                 <div className="md:w-64 flex-shrink-0 space-y-4">
                     <div>
@@ -81,28 +77,17 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ items, onClose, onDeleteIte
                         <p className="text-sm text-neutral-200">{new Date(selectedItem.createdAt).toLocaleString()}</p>
                     </div>
                      <div className="space-y-2">
-                         <button 
-                            onClick={() => onPurchase(selectedItem)}
-                            disabled={isPurchasing}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-neutral-950 bg-brand-primary hover:bg-brand-secondary transition-colors disabled:bg-neutral-700 disabled:cursor-not-allowed"
+                        <button 
+                          onClick={() => onPurchase(selectedItem)} 
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-neutral-950 bg-brand-primary hover:bg-brand-secondary transition-colors"
                         >
-                            {isPurchasing ? (
-                              <>
-                                <Loader className="w-5 h-5" />
-                                Processing...
-                              </>
-                            ) : (
-                              <>
-                                <CreditCardIcon className="w-5 h-5" />
-                                Purchase (No Watermark)
-                              </>
-                            )}
+                            <CreditCardIcon className="w-5 h-5" /> Purchase & Download
                         </button>
-                        <button onClick={() => handleDownload(selectedItem.watermarkedFlyerImageUrl, `flyer-${selectedItem.id}-watermarked.png`)} className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-neutral-700 text-sm font-medium rounded-md text-white bg-neutral-800 hover:bg-neutral-700 transition-colors">
-                            <DownloadIcon className="w-4 h-4" /> Download Free Flyer
-                        </button>
-                        <button onClick={() => handleDownload(selectedItem.watermarkedThumbnailImageUrl, `thumbnail-${selectedItem.id}-watermarked.png`)} className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-neutral-700 text-sm font-medium rounded-md text-white bg-neutral-800 hover:bg-neutral-700 transition-colors">
-                            <DownloadIcon className="w-4 h-4" /> Download Free Thumb
+                        <button 
+                          onClick={() => handleDownload(selectedItem.watermarkedFlyerImageUrl, `flyer-${selectedItem.id}-watermarked.png`)} 
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-neutral-700 text-sm font-medium rounded-md text-white bg-neutral-800 hover:bg-neutral-700 transition-colors"
+                        >
+                            <DownloadIcon className="w-4 h-4" /> Download Free
                         </button>
                      </div>
                      <button onClick={(e) => handleDelete(e, selectedItem.id)} className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-red-900/50 text-sm font-medium rounded-md text-red-400 bg-red-900/20 hover:bg-red-900/40 transition-colors">
@@ -122,7 +107,7 @@ const LibraryModal: React.FC<LibraryModalProps> = ({ items, onClose, onDeleteIte
                   role="button"
                   aria-label={`View flyer generated on ${new Date(item.createdAt).toLocaleDateString()}`}
                 >
-                  <img src={item.thumbnailImageUrl} alt="Generated flyer thumbnail" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                  <img src={item.watermarkedFlyerImageUrl} alt="Generated flyer thumbnail" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center" />
                   <button
                     onClick={(e) => handleDelete(e, item.id)}
